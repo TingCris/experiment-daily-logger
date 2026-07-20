@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SKILL_DIR="${EXPERIMENT_LOGGER_SKILL_DIR:-$HOME/.agents/skills/experiment-daily-logger}"
+
+exec python3 "$SKILL_DIR/scripts/experiment_logger.py" \
+  launch \
+  --source manual \
+  "$@"
