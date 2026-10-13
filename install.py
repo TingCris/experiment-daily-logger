@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the write-once skill, exp-run, and a PreToolUse-only hook."""
+"""Install the lifecycle logger skill, exp-run, and fallback hook."""
 
 from __future__ import annotations
 
@@ -30,7 +30,18 @@ def install_skill() -> None:
     if DEST.exists():
         shutil.rmtree(DEST)
 
-    shutil.copytree(SOURCE, DEST)
+    shutil.copytree(
+        SOURCE,
+        DEST,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".gitignore",
+            "tests",
+            "__pycache__",
+            "*.pyc",
+            "*.pyo",
+        ),
+    )
 
     executable_files = (
         list((DEST / "scripts").glob("*.py"))
@@ -115,10 +126,10 @@ def main() -> int:
     install_hook()
     REPORTS.mkdir(parents=True, exist_ok=True)
 
-    print("安装完成。该版本只在实验启动前写一次日志。")
+    print("安装完成。exp-run 会记录实验启动，并在命令结束后回写生命周期状态。")
     print(f"Skill: {DEST}")
     print(f"命令: {BIN}")
-    print(f"Hook: {HOOKS}（仅 PreToolUse）")
+    print(f"Hook: {HOOKS}（仅兜底；无法观察结束，因此记录为 unknown）")
     print(f"日志: {REPORTS}")
     print("重启 Codex 后执行 /hooks 检查并信任 Hook。")
 

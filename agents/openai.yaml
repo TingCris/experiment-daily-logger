@@ -1,4 +1,4 @@
 interface:
   display_name: "Experiment Daily Logger"
-  short_description: "Write one launch-time entry per experiment"
-  default_prompt: "Record this experiment once at launch, then run it without monitoring."
+  short_description: "Track experiment lifecycle, results, and evidence"
+  default_prompt: "Run this experiment with a durable lifecycle record, then attach verified results and evidence."

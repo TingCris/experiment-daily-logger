@@ -1,311 +1,105 @@
 # Experiment Daily Logger
 
-一个用于 Codex 的轻量实验日志 Skill。
+面向 Codex 的实验记录 Skill。每次实验用几行说明：**改了什么、是否跑完、结果如何、输出在哪**。独立 JSON 保存完整命令、运行信息和结果证据，便于跨会话核对，减少上下文压缩后的结果混淆。
 
-它会在实验启动前，将本次运行的信息追加到当天的 Markdown 日志中。默认日志目录为：
+日报示例（命令与证据默认折叠，点击记录 ID 可查看完整元数据）：
 
-```text
-$HOME/experiment-daily-report
+```markdown
+已完成 1 · 已中止 1
+
+## 14:20 · [已完成] batch-32
+
+- 改动：batch 16 → 32，数据划分和评估设置不变；对照：batch-16
+- 结果：accuracy=0.812；完整验证集，比对照高 0.7 个百分点。
+- 输出：`/project/outputs/batch-32`
+
+## 15:10 · [已中止] batch-64
+
+- 改动：batch 32 → 64，其余配置不变
+- 输出：`/project/outputs/batch-64`
+- 原因：数据划分配置错误，手动终止。
 ```
 
-也可以通过环境变量自定义：
-
-```bash
-export EXPERIMENT_DAILY_REPORT_DIR="/path/to/your/report-directory"
-```
-
-每天对应一个文件：
-
-```text
-YYYY-MM-DD.md
-```
-
-## 功能
-
-- 自动记录项目目录；
-- 自动记录实验启动时间；
-- 记录一句话实验改动说明；
-- 保存完整实验命令；
-- 自动识别常见结果输出目录；
-- 当天日志存在时自动续写；
-- 当天日志不存在时自动创建；
-- 支持 Codex 自动触发；
-- 支持普通终端手动启动实验；
-- 使用文件锁避免并发写入冲突。
-
-该版本只在启动时记录一次，不会：
-
-- 持续监控实验；
-- 轮询运行进程；
-- 等待实验结束；
-- 记录结束时间或持续时间；
-- 记录状态或退出码；
-- 在实验结束后修改日志。
-
-## 目录结构
-
-```text
-experiment-daily-logger/
-├── SKILL.md
-├── README.md
-├── install.py
-├── uninstall.sh
-├── agents/
-│   └── openai.yaml
-├── bin/
-│   └── exp-run
-├── references/
-│   └── log-format.md
-└── scripts/
-    ├── codex_hook.py
-    └── experiment_logger.py
-```
+目的、对照、标签和备注按需填写；不要求写长篇动机或补齐所有字段。关键数值、对照条件和评估范围应写准确。
 
 ## 安装
 
-进入项目目录后执行：
-
 ```bash
-cd experiment-daily-logger
 python3 install.py
 ```
 
-安装内容：
+默认安装 Skill 到 `$HOME/.agents/skills/experiment-daily-logger`、入口到 `$HOME/.local/bin/exp-run`，并配置 `$HOME/.codex/hooks.json`。日报默认保存到 `$HOME/experiment-daily-report`，可通过 `EXPERIMENT_DAILY_REPORT_DIR` 修改。若找不到 `exp-run`，把 `$HOME/.local/bin` 加入 `PATH`。
 
-```text
-$HOME/.agents/skills/experiment-daily-logger
-$HOME/.local/bin/exp-run
-$HOME/.codex/hooks.json
-$HOME/experiment-daily-report
-```
+## 日常用法
 
-## 配置 PATH
-
-如果终端提示找不到 `exp-run`：
+启动实验，写一句具体改动即可：
 
 ```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+exp-run --title "batch-32" \
+  --changes "batch 16 → 32，数据划分和评估设置不变" \
+  --baseline "batch-16" --result-dir auto \
+  -- python train.py --batch-size 32 --output-dir outputs/batch-32
 ```
 
-确认安装：
+终端会打印 `RUN_ID`。包装器自动记录命令、Git 状态及结束信息。正常退出为 `completed`，非零退出为 `failed`，观察到中断为 `interrupted`。需要说明研究问题时才添加 `--purpose`，分组时可用 `--tag`。
+
+看过结果文件后登记关键指标和一句结论：
 
 ```bash
-which exp-run
+LOGGER="$HOME/.agents/skills/experiment-daily-logger/scripts/experiment_logger.py"
+python3 "$LOGGER" update <run-id> \
+  --metric "accuracy=0.812" \
+  --metric-source "accuracy=/project/outputs/batch-32/metrics.json" \
+  --conclusion "完整验证集，比对照高 0.7 个百分点。"
 ```
 
-## 重启并检查 Codex
+需要长期引用的文件可用 `--artifact /absolute/path/to/file` 登记。指标未关联来源时会标为“缺证据”；`verify` 检查路径、文件大小和修改时间，不计算文件摘要。
 
-退出当前 Codex：
-
-```text
-Ctrl+C
-```
-
-重新启动：
+手动停止或决定丢弃时，写清原因：
 
 ```bash
-codex
+python3 "$LOGGER" update <run-id> \
+  --status interrupted --reason "数据划分配置错误，手动 Ctrl-C 终止。"
+
+python3 "$LOGGER" update <run-id> \
+  --status discarded --reason "使用了错误的数据划分，排除本次结果。"
 ```
 
-检查 Skill：
+`discarded` 保留记录和产物。尚在运行、失败、中止、丢弃及待核实的结果都不纳入正式比较；`completed` 只证明命令正常结束，仍需核对指标证据和评估范围。
 
-```text
-/skills
-```
-
-检查并信任 Hook：
-
-```text
-/hooks
-```
-
-## 在 Codex 中使用
-
-### 自动触发
-
-直接描述需要修改和运行的实验，例如：
-
-```text
-把批处理大小从 16 调整为 32，然后运行实验，
-结果保存到 outputs/batch-32。
-```
-
-Codex 会根据 `SKILL.md` 的描述判断是否自动使用该 Skill。
-
-### 显式触发
-
-需要确保触发时，可以明确指定：
-
-```text
-使用 $experiment-daily-logger，
-把批处理大小从 16 调整为 32，
-运行实验并把结果保存到 outputs/batch-32。
-```
-
-内部执行形式类似：
+每日回顾或跨会话继续时，先读取记录：
 
 ```bash
-python3 "$HOME/.agents/skills/experiment-daily-logger/scripts/experiment_logger.py" launch \
-  --source codex \
-  --summary "将批处理大小从 16 调整为 32。" \
-  --result-dir auto \
-  -- python run_experiment.py \
-       --batch-size 32 \
-       --output-dir outputs/batch-32
+python3 "$LOGGER" reconcile --date 2026-10-12
+python3 "$LOGGER" list --date 2026-10-12
+python3 "$LOGGER" show <run-id> --json
+python3 "$LOGGER" verify <run-id>
 ```
 
-记录器写入日志后，会通过 `exec` 将自身替换为原命令，不会留下持续监控进程。
+`list` 可加 `--status completed` 筛选。`reconcile` 发现本机进程已消失但记录仍是运行中时，只改为 `unknown`（待核实）。后台调度或脱离包装器的任务，需要核对实际任务和输出后再更新状态。
 
-## 在普通终端中使用
+## 补记与存储
 
-Codex 无法观察另一个终端中直接输入的命令。自己运行实验时应使用 `exp-run`：
+用 `record` 补记外部实验；无法确认是否跑完时，保留待核实状态：
 
 ```bash
-cd /path/to/project
-
-exp-run \
-  --summary "将批处理大小从 16 调整为 32。" \
-  --result-dir auto \
-  -- python run_experiment.py \
-       --batch-size 32 \
-       --output-dir outputs/batch-32
+python3 "$LOGGER" record --source recovered --status unknown \
+  --status-reason "待核对集群任务状态和结果文件" \
+  --title "外部集群训练" --changes "运行 configs/a.yaml" \
+  --project-dir /project --result-dir /project/outputs/a \
+  --command "python train.py --config configs/a.yaml"
 ```
 
-执行顺序：
+日报位于 `YYYY-MM-DD.md`，每次实验的事实记录位于 `.experiment-daily-logger/runs/YYYY-MM-DD/<run-id>.json`。用 CLI 更新，避免手改生成字段。保留旧版 `--summary` 参数和已有 Markdown 条目。
 
-1. 向当天 Markdown 追加一条记录；
-2. 使用 `exec` 启动原命令；
-3. 日志脚本退出，不再监控实验；
-4. 命令结束后不再修改日志。
+可选 PreToolUse Hook 只作为未使用包装器时的兜底：它无法看到执行结果，因此记录为 `unknown`。使用 `exp-run` 或 `experiment_logger.py launch` 才能自动跟踪命令结束状态。
 
-## 参数
-
-### `--summary`
-
-本次运行的一句话改动说明：
-
-```bash
---summary "启用新的数据预处理配置。"
-```
-
-建议显式填写。未填写时，脚本会根据命令和参数生成保守概括。
-
-### `--result-dir`
-
-明确指定结果目录：
-
-```bash
---result-dir outputs/run-01
-```
-
-或者自动识别：
-
-```bash
---result-dir auto
-```
-
-自动识别支持常见参数：
-
-```text
---output
---output-dir
---output_dir
---save-dir
---save_dir
---result-dir
---result_dir
---work-dir
---work_dir
---logging-dir
---logging_dir
---checkpoint-dir
---checkpoint_dir
-```
-
-无法识别时会写入：
-
-```text
-未识别（需要后补）
-```
-
-### `--project-dir`
-
-默认使用当前目录，也可以明确指定：
-
-```bash
---project-dir /path/to/project
-```
-
-## 补记已经启动的实验
-
-```bash
-python3 "$HOME/.agents/skills/experiment-daily-logger/scripts/experiment_logger.py" record \
-  --source recovered \
-  --summary "补记：启用新的配置文件运行实验。" \
-  --project-dir /path/to/project \
-  --result-dir /path/to/project/outputs/run-01 \
-  --command "python run_experiment.py --output-dir outputs/run-01"
-```
-
-该命令只追加一条 Markdown，不会启动、终止或监控任何进程。
-
-## 日志示例
-
-```markdown
-# 实验日报 · 2026-01-01
-
-<!-- experiment:153210-12345-a1b2c3d4 -->
-## 15:32:10 · example-project
-
-- **实验 ID**：`153210-12345-a1b2c3d4`
-- **来源**：`codex`
-- **项目目录**：`/path/to/example-project`
-- **启动时间**：2026-01-01T15:32:10+08:00
-- **一句话改动**：将批处理大小从 16 调整为 32。
-- **结果目录**：`/path/to/example-project/outputs/batch-32`
-- **命令**：
-
-```bash
-python run_experiment.py --batch-size 32 --output-dir outputs/batch-32
-```
-
-- **备注**：无
-```
+完整规则见 [记录与证据](references/record-schema.md)，显示格式见 [日报格式](references/log-format.md)。
 
 ## 卸载
-
-在项目目录中执行：
 
 ```bash
 bash uninstall.sh
 ```
 
-该脚本会删除：
-
-```text
-$HOME/.agents/skills/experiment-daily-logger
-$HOME/.local/bin/exp-run
-```
-
-已有实验日志不会被删除。
-
-为了避免误删其他 Codex Hook，脚本不会自动修改：
-
-```text
-$HOME/.codex/hooks.json
-```
-
-请手动打开该文件，删除 `command` 中包含以下内容的 Hook 条目：
-
-```text
-experiment-daily-logger/scripts/codex_hook.py
-```
-
-## 注意事项
-
-1. Skill 不能观察另一个普通终端中直接输入的命令。
-2. 手动实验应使用 `exp-run`。
-3. Hook 只在 Codex 执行匹配的 Bash 命令前触发一次。
-4. 日志只记录启动信息，不代表命令成功完成。
-5. 自动识别结果目录失败时，可以手动补充。
+卸载保留日报和 JSON。`hooks.json` 中的相关条目需按卸载提示人工核对。
